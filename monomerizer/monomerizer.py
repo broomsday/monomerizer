@@ -6,6 +6,7 @@ Functions to aid in monomerizing a homo-oligomer.
 from pathlib import Path
 from dataclasses import dataclass
 import subprocess
+import random
 
 import numpy as np
 from tqdm import tqdm
@@ -13,8 +14,7 @@ import biotite.structure as bts
 from biotite.structure.io import load_structure, save_structure
 import jsonlines
 
-from monomerizer.utils import get_total_residues
-from monomerizer.pdb import revert_to_input, compute_symmetry_rmsd
+from monomerizer import pdb, proteinmpnn
 from monomerizer.constants import (
     ANGSTROMS_PER_HELICAL_RESIDUE,
     PEPTIDE_BOND_ATOMS,
@@ -25,11 +25,14 @@ from monomerizer.constants import (
 )
 
 
+random.seed()
+
+
 @dataclass
 class GeneratedStructure:
     """Information on an RFDiffusion generated structure."""
 
-    pdb: Path
+    pdb_file: Path
     total_length: int
     linker_length: int
     symmetry_rmsd: float
@@ -45,7 +48,7 @@ class GeneratedStructure:
             input_structure, generated_structure, linker_length
         )
 
-        reverted_structure = revert_to_input(
+        reverted_structure = pdb.revert_to_input(
             wt_structure,
             generated_structure,
             input_resids,
@@ -53,24 +56,26 @@ class GeneratedStructure:
         )
         save_structure(generated_pdb, reverted_structure)
 
-        fixed_positions = make_fixed_positions_jsonl(
+        fixed_positions = proteinmpnn.make_fixed_positions_jsonl(
             generated_pdb, generated_structure, generated_resids
         )
         with open(generated_pdb.with_suffix(".fixed.jsonl"), mode="wb") as fp:
             with jsonlines.Writer(fp) as writer:
                 writer.write(fixed_positions)
 
-        symmetric_positions = make_symmetric_positions_jsonl(
+        symmetric_positions = proteinmpnn.make_symmetric_positions_jsonl(
             generated_pdb, generated_structure, generated_resids
         )
         with open(generated_pdb.with_suffix(".symmetric.jsonl"), mode="wb") as fp:
             with jsonlines.Writer(fp) as writer:
                 writer.write(symmetric_positions)
 
-        self.pdb = generated_pdb
-        self.total_length = get_total_residues(generated_pdb)
+        self.pdb_file = generated_pdb
+        self.total_length = pdb.get_total_residues(generated_pdb)
         self.linker_length = linker_length
-        self.symmetry_rmsd = compute_symmetry_rmsd(reverted_structure, generated_resids)
+        self.symmetry_rmsd = pdb.compute_symmetry_rmsd(
+            reverted_structure, generated_resids
+        )
 
 
 def compute_res_range(n_nitrogen: bts.Atom, c_carbon: bts.Atom) -> tuple[int, int]:
@@ -135,7 +140,7 @@ def parse_manual_res_range(manual_lengths: str) -> list[int]:
     return lengths
 
 
-def generate_contigs_string(structure: bts.AtomArray) -> str:
+def generate_base_contigs(structure: bts.AtomArray) -> str:
     """
     Based on the spacing between N- and C-termini of adjacent chains,
     generates a `contigs` string for use in RFDiffusion that should be
@@ -159,41 +164,55 @@ def generate_contigs_string(structure: bts.AtomArray) -> str:
     return contig_string
 
 
-def get_shell_script_rfdiffusion(
+def parse_monomer_length(contigs: str) -> int:
+    """
+    Assuming the input file is sequentially res-numbered, determine the length of the monomers.
+    """
+    lengths = [
+        (int(contig.split("-")[-1]) - int(contig.split("-")[0][1:]) + 1)
+        for contig in contigs.split("/")
+        if "-" in contig
+    ]
+    return int(np.mean(lengths))
+
+
+def generate_pore_contigs(
+    pore_res_ids: list[int],
+    pore_res_chain_id: str,
+    linker_length: int,
+    base_contigs: str,
+) -> tuple[str, int]:
+    """
+    Add contigs for the pore-filling individual amino acids that will be used.
+
+    Additionally and a N->C linker residue.
+
+    Return these contigs, as well as the number of extra symmetry units that have been added.
+    """
+    # TODO: if we don't have enough pore residues, we'll need to start adding again from the beginning
+    # TODO: add in the N->C linkage using contig magic
+    #   TODO: if above doesn't work add to structure, assume it's added as N+1 residue over the base contigs
+    monomer_length = parse_monomer_length(base_contigs)
+    symmetry_length = monomer_length + linker_length
+
+    symmetry_unit_count = int(len(pore_res_ids) / symmetry_length)
+    keep_pore_res_ids = random.sample(
+        pore_res_ids, symmetry_unit_count * symmetry_length
+    )
+
+    pore_contigs = "/0 "
+    for res_id in keep_pore_res_ids:
+        pore_contigs += f"{pore_res_chain_id}{res_id}-{res_id}/0 "
+
+    return (pore_contigs, symmetry_unit_count)
+
+
+def make_shell_script(
     input_pdb: Path,
     output_dir: Path,
     res_length: int,
     contigs: str,
-    num_designs: int,
-    steps: int,
-) -> str:
-    """
-    Write a shell script that will run RFDiffusion using the generated output file and computed contigs.
-    """
-    shell_str = "#!/bin/bash\n\n"
-    shell_str += "cd /home/broom/AlphaCarbon/software/RFdiffusion\n"
-    shell_str += "source /usr/etc/profile.d/conda.sh\n"
-    shell_str += "conda deactivate\n"
-    shell_str += "conda activate SE3nv\n"
-
-    contig_map = contigs.replace("XXX_LINKER", str(res_length))
-
-    shell_str += f"./scripts/run_inference.py "
-    shell_str += f"'contigmap.contigs=[{contig_map}]' "
-    shell_str += f"inference.num_designs={num_designs} "
-    shell_str += f"inference.output_prefix={output_dir.absolute()}/{input_pdb.stem}_{res_length}_monomer "
-    shell_str += f"inference.input_pdb={input_pdb.absolute()} "
-    shell_str += f"diffuser.T={steps}\n"
-    shell_str += "cd /home/broom/AlphaCarbon/code/porepep\n"
-
-    return shell_str
-
-
-def get_shell_script_pgenerator(
-    input_pdb: Path,
-    output_dir: Path,
-    res_length: int,
-    contigs: str,
+    extra_symmetry: int,
     num_designs: int,
     steps: int,
 ) -> str:
@@ -214,7 +233,7 @@ def get_shell_script_pgenerator(
 
     shell_str += f"python ./inference.py "
     shell_str += f"--contigs {contig_map} "
-    shell_str += f"--symmetry {symmetry} "
+    shell_str += f"--symmetry {symmetry + extra_symmetry} "
     shell_str += f"--num_designs {num_designs} "
     shell_str += f"--out {output_dir.absolute()}/{input_pdb.stem}_{res_length}_monomer "
     shell_str += "--save_best_plddt "
@@ -225,24 +244,15 @@ def get_shell_script_pgenerator(
     return shell_str
 
 
-def format_design_idx(design_idx: int, method: str):
-    """
-    Format the design index depending on if this is from RFDiffusion or ProteinGenerator.
-    """
-    if method == "ProteinGenerator":
-        return f"{design_idx:06d}"
-
-    return str(design_idx)
-
-
 def generate_linked_structures(
     wt_pdb: Path,
     input_pdb: Path,
+    pore_res_ids: list[int],
+    pore_res_chain_id: str,
     output_dir: Path,
     res_lengths: list[int],
     num_designs: int,
     contigs: str,
-    method: str = "RFDiffusion",
     steps: int = 25,
 ) -> list[GeneratedStructure]:
     """
@@ -253,23 +263,26 @@ def generate_linked_structures(
         scan_dir = output_dir / str(res_length)
         scan_dir.mkdir(exist_ok=True, parents=True)
 
-        # if we've already run this length, move to the next
+        # dont't run if we already have enough generated structures (e.g. from previously stopped run)
         if len(list(scan_dir.glob("*.pdb"))) < num_designs:
-            if method == "ProteinGenerator":
-                shell_script = get_shell_script_pgenerator(
-                    input_pdb, scan_dir, res_length, contigs, num_designs, steps
-                )
-            else:
-                shell_script = get_shell_script_rfdiffusion(
-                    input_pdb, scan_dir, res_length, contigs, num_designs, steps
-                )
+            pore_contigs, extra_symmetry = generate_pore_contigs(
+                pore_res_ids, pore_res_chain_id, res_length, contigs
+            )
+            shell_script = make_shell_script(
+                input_pdb,
+                scan_dir,
+                res_length,
+                contigs + pore_contigs,
+                extra_symmetry,
+                num_designs,
+                steps,
+            )
 
             subprocess.run(shell_script, shell=True)  # TODO: hide stdout
 
         for design_idx in range(num_designs):
             run_pdb = (
-                scan_dir
-                / f"{input_pdb.stem}_{res_length}_monomer_{format_design_idx(design_idx, method)}.pdb"
+                scan_dir / f"{input_pdb.stem}_{res_length}_monomer_{design_idx:06d}.pdb"
             )
             scans.append(GeneratedStructure(wt_pdb, input_pdb, run_pdb, res_length))
 
@@ -284,7 +297,7 @@ def get_unified_resids(
     """
     Given the input structure and RFD generated structure, return a list of the generated resids.
     """
-    # RFDiffusion/ProteinGenerator renumber residues to start from 1 and be completely sequential
+    # ProteinGenerator renumbers residues to start from 1 and be completely sequential
     #   so adjust resids to match
     input_resids = input_structure[input_structure.atom_name == "CA"].res_id
 
@@ -309,111 +322,3 @@ def get_unified_resids(
     ]
 
     return unified_resids, generated_resids
-
-
-def get_resids_in_contact(
-    structure: bts.AtomArray, query_resids: list[int], cutoff_distance: float = 6.0
-) -> list[int]:
-    """
-    Given a structure and query list of residue IDs, return all resids with CA within a cutoff distance.
-    Note: Does not include the query list itself.
-    """
-    cell_list = bts.CellList(
-        structure[structure.atom_name == "CA"], cell_size=cutoff_distance
-    )
-    adjacency_matrix = cell_list.create_adjacency_matrix(cutoff_distance)
-
-    query_res_idxs = [
-        resid - 1 for resid in query_resids
-    ]  # adjacency matrix is 0-indexed, whereas res_ids are 1-indexd
-
-    contacting_resids = []
-    for res_id in structure[structure.atom_name == "CA"].res_id:
-        query_adjacency = adjacency_matrix[res_id - 1, query_res_idxs]
-        if (True in query_adjacency) and (res_id not in query_resids):
-            contacting_resids.append(res_id)
-
-    return contacting_resids
-
-
-def make_fixed_positions_jsonl(
-    pdb: Path, structure: bts.AtomArray, generated_resids: list[int]
-) -> dict[str, dict[str, list[int]]]:
-    """
-    Given the original unified structure and that with linkers generated,
-    determine which residues are in contact with the generated linker and make a .jsonl
-    file for ProteinMPNN that would fix all other residues.
-
-    format: {"PDB.stem": {"ChainID": [residue numbers of all fixed]}}
-    """
-    variable_resids = (
-        get_resids_in_contact(structure, generated_resids) + generated_resids
-    )
-    fixed_resids = [
-        resid
-        for resid in structure[structure.atom_name == "CA"].res_id
-        if resid not in variable_resids
-    ]
-
-    fixed_positions_dict = {
-        pdb.stem: {structure.chain_id[0]: [int(res_id) for res_id in fixed_resids]}
-    }
-
-    return fixed_positions_dict
-
-
-def make_symmetric_positions_jsonl(
-    pdb: Path, structure: bts.AtomArray, generated_resids: list[int]
-) -> dict[str, dict[str, list[int]]]:
-    """
-    Given the original unified structure and that with linkers generated,
-    determine which residues are in contact with the generated linker and make a .jsonl
-    file for ProteinMPNN that would fix all other residues.
-
-    format: {"PDB.stem": {"ChainID": [residue numbers tied position 1]}, {"ChainID: [residue numbers tied position 2]}}
-    """
-    symmetric_positions_dict = {pdb.stem: []}
-
-    resids = structure[structure.atom_name == "CA"].res_id
-    original_resids = [resid for resid in resids if resid not in generated_resids]
-
-    original_symmetric_units = []
-    last_resid = None
-    current_unit = []
-    for resid in original_resids:
-        if (last_resid is not None) and (resid - 1 > last_resid):
-            original_symmetric_units.append(current_unit)
-            current_unit = []
-        current_unit.append(int(resid))
-        last_resid = resid
-    original_symmetric_units.append(current_unit)
-
-    generated_symmetric_units = []
-    last_resid = None
-    current_unit = []
-    for resid in generated_resids:
-        if (last_resid is not None) and (resid - 1 > last_resid):
-            generated_symmetric_units.append(current_unit)
-            current_unit = []
-        current_unit.append(int(resid))
-        last_resid = resid
-    generated_symmetric_units.append(current_unit)
-    if len(generated_symmetric_units) < len(original_symmetric_units):
-        generated_symmetric_units.append([])
-
-    full_symmetric_units = [
-        original_symmetric_units[idx] + generated_symmetric_units[idx]
-        for idx in range(len(original_symmetric_units))
-    ]
-
-    for idx in range(len(full_symmetric_units[0])):
-        symmetric_positions = [
-            symmetric_unit[idx]
-            for symmetric_unit in full_symmetric_units
-            if idx < len(symmetric_unit)
-        ]
-        symmetric_positions_dict[pdb.stem].append(
-            {structure.chain_id[0]: symmetric_positions}
-        )
-
-    return symmetric_positions_dict

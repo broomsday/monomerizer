@@ -1,18 +1,22 @@
 """
-Functions for manipulating PDBs
+Functions for manipulating and analyzing PDB structures.
 """
 
 
+from pathlib import Path
 import itertools
 
 import numpy as np
 import biotite.structure as bts
+from biotite.structure.io import load_structure
+from volumizer import volumizer
+from volumizer import utils as volumizer_utils
 
 from monomerizer.constants import (
     RESNUM_OFFSET,
-    AXIS_ORDER,
     BACKBONE_ATOMS,
 )
+from monomerizer.paths import FILL_RES_DIR
 
 
 def renumber_residues(
@@ -48,13 +52,6 @@ def unify_chain_ids(structure: bts.AtomArray) -> bts.AtomArray:
     structure.chain_id = ["A"] * len(structure)
 
     return structure
-
-
-def align_to_axis(structure: bts.AtomArray, axis: str) -> bts.AtomArray:
-    """
-    Align the principal axis to the specified axis.
-    """
-    return bts.orient_principal_components(structure, order=AXIS_ORDER[axis])
 
 
 def mutate_to_ala(structure: bts.AtomArray) -> bts.AtomArray:
@@ -167,3 +164,69 @@ def compute_symmetry_rmsd(structure: bts.AtomArray, resids: list[int]) -> float:
         rmsds.append(bts.rmsd(ref_segment, superimposed))
 
     return np.mean(rmsds)
+
+
+def get_resids_in_contact(
+    structure: bts.AtomArray, query_resids: list[int], cutoff_distance: float = 6.0
+) -> list[int]:
+    """
+    Given a structure and query list of residue IDs, return all resids with CA within a cutoff distance.
+    Note: Does not include the query list itself.
+    """
+    cell_list = bts.CellList(
+        structure[structure.atom_name == "CA"], cell_size=cutoff_distance
+    )
+    adjacency_matrix = cell_list.create_adjacency_matrix(cutoff_distance)
+
+    query_res_idxs = [
+        resid - 1 for resid in query_resids
+    ]  # adjacency matrix is 0-indexed, whereas res_ids are 1-indexd
+
+    contacting_resids = []
+    for res_id in structure[structure.atom_name == "CA"].res_id:
+        query_adjacency = adjacency_matrix[res_id - 1, query_res_idxs]
+        if (True in query_adjacency) and (res_id not in query_resids):
+            contacting_resids.append(res_id)
+
+    return contacting_resids
+
+
+def get_total_residues(pdb_file: Path) -> int:
+    """
+    Get the total number of residues in the structure.
+    """
+    structure = load_structure(pdb_file)
+    return len(structure[structure.atom_name == "CA"].res_id)
+
+
+def fill_pore(structure: bts.AtomArray) -> bts.AtomArray:
+    """
+    Add alanine residues within the pore of the structure.
+    """
+    volumizer_utils.set_resolution(5.0)
+    _, aligned_structure, volumes_structure = volumizer.volumize_structure(structure)
+
+    # pull out the pore
+    pore_voxel_structure = volumes_structure[volumes_structure.res_name == "POR"]
+
+    # setup the resids for downstream ProteinGenerator use
+    pore_start_res_id = max(structure.res_id) + RESNUM_OFFSET
+    pore_voxel_structure.res_id = [
+        pore_start_res_id + i for i in range(len(pore_voxel_structure))
+    ]
+    pore_res_ids = list(pore_voxel_structure.res_id)
+
+    # load and prepare the residue to be used for pore filling
+    fill_res_structure = load_structure(FILL_RES_DIR / "ALA.pdb")
+    pore_res_chain_id = chr(ord(aligned_structure.chain_id[0]) + 1)
+    fill_res_structure.chain_id = [pore_res_chain_id] * len(fill_res_structure)
+
+    # replace each pore atom with the fill residue
+    pore_structure = bts.AtomArray(0)
+    for i, pore_voxel in enumerate(pore_voxel_structure):
+        displacement = bts.displacement(bts.centroid(fill_res_structure), pore_voxel)
+        fill_res_structure = bts.translate(fill_res_structure, displacement)
+        fill_res_structure.res_id = [pore_res_ids[i]] * len(fill_res_structure)
+        pore_structure += fill_res_structure
+
+    return (pore_res_ids, pore_res_chain_id, (aligned_structure + pore_structure))

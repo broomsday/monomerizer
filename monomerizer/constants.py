@@ -1,12 +1,4 @@
 RESNUM_OFFSET = 200
-AXIS_ORDER = {
-    0: (0, 1, 2),
-    1: (0, 2, 1),
-    2: (1, 0, 2),
-    3: (1, 2, 0),
-    4: (2, 0, 1),
-    5: (2, 1, 0),
-}
 PEPTIDE_BOND_ATOMS = ["N", "C"]
 BACKBONE_ATOMS = ["N", "C", "CA", "O"]
 ANGSTROMS_PER_HELICAL_RESIDUE = (
