@@ -149,7 +149,7 @@ def generate_base_contigs(structure: bts.AtomArray) -> str:
     peptide_bond_atoms = structure[np.isin(structure.atom_name, PEPTIDE_BOND_ATOMS)]
 
     last_atom = peptide_bond_atoms[0]
-    contig_string = f"{last_atom.chain_id}{last_atom.res_id}-"
+    contig_string = f"{peptide_bond_atoms[0].chain_id}{peptide_bond_atoms[0].res_id}-"
     for atom in peptide_bond_atoms:
         # when we hit a chain break, add our notation
         if (atom.res_id - last_atom.res_id) > 1:
@@ -159,7 +159,8 @@ def generate_base_contigs(structure: bts.AtomArray) -> str:
         last_atom = atom
 
     contig_string += f"{last_atom.res_id}"
-    contig_string += "/XXX_LINKER"
+    contig_string += "/XXX_LINKER/"
+    contig_string += f"{peptide_bond_atoms[0].chain_id}{peptide_bond_atoms[0].res_id}-{peptide_bond_atoms[0].res_id}"
 
     return contig_string
 
@@ -173,6 +174,8 @@ def parse_monomer_length(contigs: str) -> int:
         for contig in contigs.split("/")
         if "-" in contig
     ]
+    lengths.pop()  # remove the terminal duplicate residue
+
     return int(np.mean(lengths))
 
 
@@ -189,16 +192,18 @@ def generate_pore_contigs(
 
     Return these contigs, as well as the number of extra symmetry units that have been added.
     """
-    # TODO: if we don't have enough pore residues, we'll need to start adding again from the beginning
-    # TODO: add in the N->C linkage using contig magic
-    #   TODO: if above doesn't work add to structure, assume it's added as N+1 residue over the base contigs
     monomer_length = parse_monomer_length(base_contigs)
     symmetry_length = monomer_length + linker_length
 
     symmetry_unit_count = int(len(pore_res_ids) / symmetry_length)
-    keep_pore_res_ids = random.sample(
-        pore_res_ids, symmetry_unit_count * symmetry_length
-    )
+    pore_res_needed = (
+        symmetry_unit_count * symmetry_length
+    ) - 1  # -1 for duplicated terminal residue
+
+    if len(pore_res_ids) >= pore_res_needed:
+        keep_pore_res_ids = random.sample(pore_res_ids, pore_res_needed)
+    else:
+        keep_pore_res_ids = random.choices(pore_res_ids, pore_res_needed)
 
     pore_contigs = "/0 "
     for res_id in keep_pore_res_ids:
@@ -240,6 +245,9 @@ def make_shell_script(
     shell_str += f"--pdb {input_pdb.absolute()} "
     shell_str += f"--T {steps}\n"
     shell_str += "cd /home/broom/AlphaCarbon/code/porepep\n"
+
+    print(shell_str)
+    # quit()
 
     return shell_str
 
