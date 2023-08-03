@@ -32,7 +32,7 @@ def make_fixed_positions_jsonl(
     """
     variable_resids = (
         pdb.get_resids_in_contact(structure, generated_resids) + generated_resids
-    )
+    )  # TODO: this function has changed, need to check that this still makes sense
     fixed_resids = [
         resid
         for resid in structure[structure.atom_name == "CA"].res_id

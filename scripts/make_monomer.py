@@ -53,9 +53,6 @@ def main(
     unified_structure = load_structure(input_pdb)
 
     # perform structure modifications
-    unified_structure = pdb.mutate_to_ala(
-        unified_structure
-    )  # TODO: undo this once we have inpainting working
     if (trim_n > 0) or (trim_c > 0):
         unified_structure = pdb.trim_termini(unified_structure, trim_n, trim_c)
     unified_structure = pdb.unify_chain_ids(unified_structure)
@@ -67,6 +64,12 @@ def main(
     pore_res_ids, pore_res_chain_id, unified_structure = pdb.fill_pore(
         unified_structure
     )
+    # mutate to ALA all solvent exposed residues not in contact with the pore
+    fixed_res_ids = monomerizer.get_fixed_res_ids(unified_structure, pore_res_ids)
+    unified_structure = pdb.mutate_to_res(
+        unified_structure, fixed_res_ids, "ALA"
+    )  # TODO: undo this once we have inpainting working
+
     unified_pdb = (output_dir / input_pdb.stem).with_suffix(".unified.pdb")
     save_structure(unified_pdb, unified_structure)
 

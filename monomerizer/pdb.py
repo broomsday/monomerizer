@@ -54,12 +54,17 @@ def unify_chain_ids(structure: bts.AtomArray) -> bts.AtomArray:
     return structure
 
 
-def mutate_to_ala(structure: bts.AtomArray) -> bts.AtomArray:
+def mutate_to_res(
+    structure: bts.AtomArray, fixed_res_ids: list[int], res_name: str = "ALA"
+) -> bts.AtomArray:
     """
     Mutate all residues to alanine resname, and delete all sidechains.
     """
-    structure.res_name = ["ALA"] * len(structure)
     structure = structure[np.isin(structure.atom_name, BACKBONE_ATOMS)]
+    structure.res_name = [
+        res_name if atom.res_id not in fixed_res_ids else atom.res_name
+        for atom in structure
+    ]
 
     return structure
 
@@ -167,28 +172,35 @@ def compute_symmetry_rmsd(structure: bts.AtomArray, resids: list[int]) -> float:
 
 
 def get_resids_in_contact(
-    structure: bts.AtomArray, query_resids: list[int], cutoff_distance: float = 6.0
+    structure: bts.AtomArray, query_res_ids: list[int], cutoff_distance: float = 4.0
 ) -> list[int]:
     """
-    Given a structure and query list of residue IDs, return all resids with CA within a cutoff distance.
+    Given a structure and query list of residue IDs, return all resids with atoms within a cutoff distance.
     Note: Does not include the query list itself.
     """
-    cell_list = bts.CellList(
-        structure[structure.atom_name == "CA"], cell_size=cutoff_distance
-    )
+    atom_idx_to_resid = {
+        atom_idx: atom.res_id for atom_idx, atom in enumerate(structure)
+    }
+    query_atom_idx = [
+        atom_idx
+        for atom_idx, res_id in atom_idx_to_resid.items()
+        if res_id in query_res_ids
+    ]
+
+    cell_list = bts.CellList(structure, cell_size=cutoff_distance)
     adjacency_matrix = cell_list.create_adjacency_matrix(cutoff_distance)
 
-    query_res_idxs = [
-        resid - 1 for resid in query_resids
-    ]  # adjacency matrix is 0-indexed, whereas res_ids are 1-indexd
+    contacting_res_ids = []
+    for atom_idx, res_id in atom_idx_to_resid.items():
+        if res_id in query_res_ids:
+            continue
+        if res_id in contacting_res_ids:
+            continue
 
-    contacting_resids = []
-    for res_id in structure[structure.atom_name == "CA"].res_id:
-        query_adjacency = adjacency_matrix[res_id - 1, query_res_idxs]
-        if (True in query_adjacency) and (res_id not in query_resids):
-            contacting_resids.append(res_id)
+        if True in adjacency_matrix[atom_idx, query_atom_idx]:
+            contacting_res_ids.append(res_id)
 
-    return contacting_resids
+    return contacting_res_ids
 
 
 def get_total_residues(pdb_file: Path) -> int:
@@ -230,3 +242,30 @@ def fill_pore(structure: bts.AtomArray) -> bts.AtomArray:
         pore_structure += fill_res_structure
 
     return (pore_res_ids, pore_res_chain_id, (aligned_structure + pore_structure))
+
+
+def get_buried_res_ids(
+    structure: bts.AtomArray, buried_cutoff: float = 10.0
+) -> list[int]:
+    """
+    Return a list of all res-ids that are buried from solvent.
+
+    Considers only the sidechain (and CA) atoms.
+
+    Definition being < 10 A^2 SASA across the sidechain atoms only.
+    """
+    residue_starts = bts.get_residue_starts(structure)
+
+    sasa_per_atom = bts.sasa(structure)
+    sasa_per_residue = [
+        np.sum(sasa_per_atom[residue_start : residue_starts[i + 1]])
+        if i + 1 < len(residue_starts)
+        else np.sum(sasa_per_atom[residue_start:])
+        for i, residue_start in enumerate(residue_starts)
+    ]
+
+    return [
+        res_id
+        for i, res_id in enumerate(structure[structure.atom_name == "CA"].res_id)
+        if sasa_per_residue[i] <= buried_cutoff
+    ]

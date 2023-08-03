@@ -246,9 +246,6 @@ def make_shell_script(
     shell_str += f"--T {steps}\n"
     shell_str += "cd /home/broom/AlphaCarbon/code/porepep\n"
 
-    print(shell_str)
-    # quit()
-
     return shell_str
 
 
@@ -303,7 +300,7 @@ def get_unified_resids(
     linker_length: int,
 ) -> tuple[list[int], list[int]]:
     """
-    Given the input structure and RFD generated structure, return a list of the generated resids.
+    Given the input structure and ProteinGenerator generated structure, return a list of the generated resids.
     """
     # ProteinGenerator renumbers residues to start from 1 and be completely sequential
     #   so adjust resids to match
@@ -330,3 +327,20 @@ def get_unified_resids(
     ]
 
     return unified_resids, generated_resids
+
+
+def get_fixed_res_ids(structure: bts.AtomArray, pore_res_ids: list[int]) -> list[int]:
+    """
+    Determine which residues should be fixed to their input identity:
+
+    1. If they are in contact with the pore
+    2. If they have very low solvent exposure
+    """
+    pore_contacting_res_ids = pdb.get_resids_in_contact(
+        structure, pore_res_ids, cutoff_distance=8.0
+    )
+    buried_res_ids = pdb.get_buried_res_ids(
+        structure[~np.isin(structure.res_id, pore_res_ids)]
+    )
+
+    return pore_contacting_res_ids + buried_res_ids
