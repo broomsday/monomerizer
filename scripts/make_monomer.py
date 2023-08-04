@@ -70,11 +70,6 @@ def main(
         unified_structure, fixed_res_ids, pore_res_chain_id
     )
 
-    # mutate to ALA all solvent exposed residues not in contact with the pore
-    unified_structure = pdb.mutate_to_res(
-        unified_structure, fixed_res_ids, "ALA"
-    )  # TODO: undo this once we have inpainting working
-
     unified_pdb = (output_dir / input_pdb.stem).with_suffix(".unified.pdb")
     save_structure(unified_pdb, unified_structure)
 
@@ -86,7 +81,6 @@ def main(
 
     # scan over residue lengths and generate structures
     structures = monomerizer.generate_linked_structures(
-        input_pdb,
         unified_pdb,
         pore_res_ids,
         pore_res_chain_id,
@@ -99,7 +93,7 @@ def main(
     )
 
     results = {
-        "pdb": [structure.pdb for structure in structures],
+        "pdb": [structure.pdb_file for structure in structures],
         "linker_length": [structure.linker_length for structure in structures],
         "symmetry_rmsd": [structure.symmetry_rmsd for structure in structures],
     }
@@ -112,7 +106,7 @@ def main(
             results_df.iloc[idx].pdb,
             selected_dir / results_df.iloc[idx].pdb.name,
         )
-    results_df.to_csv(output_dir / f"{results}.csv")
+    results_df.to_csv(output_dir / "results.csv")
     print(results_df)
 
 

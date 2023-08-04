@@ -153,9 +153,14 @@ def compute_symmetry_rmsd(structure: bts.AtomArray, resids: list[int]) -> float:
         last_resid = resid
     resid_segments.append(segment)
 
+    # print(resid_segments)
+
+    structure = structure[structure.atom_name == "CA"]
     structure_segments = [
         structure[np.isin(structure.res_id, resids)] for resids in resid_segments
     ]
+
+    # print(structure_segments)
 
     ref_id = int(len(structure_segments) / 2)
     ref_segment = structure_segments[ref_id]

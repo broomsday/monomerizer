@@ -37,24 +37,13 @@ class GeneratedStructure:
     linker_length: int
     symmetry_rmsd: float
 
-    def __init__(
-        self, wt_pdb: Path, input_pdb: Path, generated_pdb: Path, linker_length: int
-    ):
-        wt_structure = load_structure(wt_pdb)
+    def __init__(self, input_pdb: Path, generated_pdb: Path, linker_length: int):
         input_structure = load_structure(input_pdb)
         generated_structure = load_structure(generated_pdb)
 
-        input_resids, generated_resids = get_unified_resids(
+        generated_resids = get_unified_resids(
             input_structure, generated_structure, linker_length
         )
-
-        reverted_structure = pdb.revert_to_input(
-            wt_structure,
-            generated_structure,
-            input_resids,
-            generated_resids,
-        )
-        save_structure(generated_pdb, reverted_structure)
 
         fixed_positions = proteinmpnn.make_fixed_positions_jsonl(
             generated_pdb, generated_structure, generated_resids
@@ -74,7 +63,7 @@ class GeneratedStructure:
         self.total_length = pdb.get_total_residues(generated_pdb)
         self.linker_length = linker_length
         self.symmetry_rmsd = pdb.compute_symmetry_rmsd(
-            reverted_structure, generated_resids
+            generated_structure, generated_resids
         )
 
 
@@ -223,7 +212,7 @@ def make_shell_script(
     steps: int,
 ) -> str:
     """
-    Write a shell script that will run RFDiffusion using the generated output file and computed contigs.
+    Write a shell script that will run ProteinGenerator using the input pdb file and computed contigs.
     """
     shell_str = "#!/bin/bash\n\n"
     shell_str += "cd /home/broom/AlphaCarbon/software/protein_generator\n"
@@ -241,7 +230,7 @@ def make_shell_script(
     shell_str += f"--num_designs {num_designs} "
     shell_str += f"--out {output_dir.absolute()}/{input_pdb.stem}_{res_length}_monomer "
     shell_str += "--save_best_plddt "
-    shell_str += "--predict_symmetric "
+    # shell_str += "--predict_symmetric "
     shell_str += f"--pdb {input_pdb.absolute()} "
     shell_str += f"--T {steps}\n"
     shell_str += "cd /home/broom/AlphaCarbon/code/porepep\n"
@@ -250,7 +239,6 @@ def make_shell_script(
 
 
 def generate_linked_structures(
-    wt_pdb: Path,
     input_pdb: Path,
     pore_res_ids: list[int],
     pore_res_chain_id: str,
@@ -262,7 +250,7 @@ def generate_linked_structures(
     steps: int = 25,
 ) -> list[GeneratedStructure]:
     """
-    Run RFDiffusion or ProteinGenerator to generate linker residues across a series of lengths.
+    Run ProteinGenerator to generate linker residues across a series of lengths.
     """
     scans = []
     for res_length in tqdm(res_lengths, desc="Generating structures"):
@@ -285,14 +273,13 @@ def generate_linked_structures(
                 steps,
             )
 
-            print(shell_script)
-            subprocess.run(shell_script, shell=True)  # TODO: hide stdout
+            subprocess.run(shell_script, shell=True, stdout=subprocess.DEVNULL)
 
         for design_idx in range(num_designs):
             run_pdb = (
                 scan_dir / f"{input_pdb.stem}_{res_length}_monomer_{design_idx:06d}.pdb"
             )
-            scans.append(GeneratedStructure(wt_pdb, input_pdb, run_pdb, res_length))
+            scans.append(GeneratedStructure(input_pdb, run_pdb, res_length))
 
     return scans
 
@@ -301,7 +288,7 @@ def get_unified_resids(
     input_structure: bts.AtomArray,
     generated_structure: bts.AtomArray,
     linker_length: int,
-) -> tuple[list[int], list[int]]:
+) -> list[int]:
     """
     Given the input structure and ProteinGenerator generated structure, return a list of the generated resids.
     """
@@ -329,7 +316,8 @@ def get_unified_resids(
         if res_id not in unified_resids
     ]
 
-    return unified_resids, generated_resids
+    # return unified_resids, generated_resids
+    return generated_resids
 
 
 def get_fixed_res_ids(structure: bts.AtomArray, pore_res_ids: list[int]) -> list[int]:
