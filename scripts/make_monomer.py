@@ -64,8 +64,13 @@ def main(
     pore_res_ids, pore_res_chain_id, unified_structure = pdb.fill_pore(
         unified_structure
     )
-    # mutate to ALA all solvent exposed residues not in contact with the pore
+    # determine which residues the pore contacts or are buried, these should be fixed
     fixed_res_ids = monomerizer.get_fixed_res_ids(unified_structure, pore_res_ids)
+    inpaint_contigs = monomerizer.generate_inpaint_contig(
+        unified_structure, fixed_res_ids, pore_res_chain_id
+    )
+
+    # mutate to ALA all solvent exposed residues not in contact with the pore
     unified_structure = pdb.mutate_to_res(
         unified_structure, fixed_res_ids, "ALA"
     )  # TODO: undo this once we have inpainting working
@@ -89,6 +94,7 @@ def main(
         res_lengths,
         num_designs,
         base_contigs,
+        inpaint_contigs,
         steps=generator_steps,
     )
 

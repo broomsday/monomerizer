@@ -154,12 +154,12 @@ def generate_base_contigs(structure: bts.AtomArray) -> str:
         # when we hit a chain break, add our notation
         if (atom.res_id - last_atom.res_id) > 1:
             contig_string += f"{last_atom.res_id}"
-            contig_string += "/XXX_LINKER/"
+            contig_string += ",XXX_LINKER,"
             contig_string += f"{atom.chain_id}{atom.res_id}-"
         last_atom = atom
 
     contig_string += f"{last_atom.res_id}"
-    contig_string += "/XXX_LINKER/"
+    contig_string += ",XXX_LINKER,"
     contig_string += f"{peptide_bond_atoms[0].chain_id}{peptide_bond_atoms[0].res_id}-{peptide_bond_atoms[0].res_id}"
 
     return contig_string
@@ -171,7 +171,7 @@ def parse_monomer_length(contigs: str) -> int:
     """
     lengths = [
         (int(contig.split("-")[-1]) - int(contig.split("-")[0][1:]) + 1)
-        for contig in contigs.split("/")
+        for contig in contigs.split(",")
         if "-" in contig
     ]
     lengths.pop()  # remove the terminal duplicate residue
@@ -205,9 +205,9 @@ def generate_pore_contigs(
     else:
         keep_pore_res_ids = random.choices(pore_res_ids, pore_res_needed)
 
-    pore_contigs = "/0 "
+    pore_contigs = ",0 "
     for res_id in keep_pore_res_ids:
-        pore_contigs += f"{pore_res_chain_id}{res_id}-{res_id}/0 "
+        pore_contigs += f"{pore_res_chain_id}{res_id}-{res_id},0 "
 
     return (pore_contigs, symmetry_unit_count)
 
@@ -217,6 +217,7 @@ def make_shell_script(
     output_dir: Path,
     res_length: int,
     contigs: str,
+    inpaint: str,
     extra_symmetry: int,
     num_designs: int,
     steps: int,
@@ -230,18 +231,17 @@ def make_shell_script(
     shell_str += "conda deactivate\n"
     shell_str += "conda activate proteingenerator\n"
 
-    symmetry = contigs.count("XXX_LINKER")
     contig_map = contigs.replace("XXX_LINKER", str(res_length))
-    contig_map = contig_map.replace(
-        "/", ","
-    )  # modify the RFDiffusion default for Protein Generator
+    symmetry = contigs.count("XXX_LINKER")
 
     shell_str += f"python ./inference.py "
     shell_str += f"--contigs {contig_map} "
+    shell_str += f"--inpaint_seq {inpaint} "
     shell_str += f"--symmetry {symmetry + extra_symmetry} "
     shell_str += f"--num_designs {num_designs} "
     shell_str += f"--out {output_dir.absolute()}/{input_pdb.stem}_{res_length}_monomer "
     shell_str += "--save_best_plddt "
+    shell_str += "--predict_symmetric "
     shell_str += f"--pdb {input_pdb.absolute()} "
     shell_str += f"--T {steps}\n"
     shell_str += "cd /home/broom/AlphaCarbon/code/porepep\n"
@@ -258,6 +258,7 @@ def generate_linked_structures(
     res_lengths: list[int],
     num_designs: int,
     contigs: str,
+    inpaint: str,
     steps: int = 25,
 ) -> list[GeneratedStructure]:
     """
@@ -278,11 +279,13 @@ def generate_linked_structures(
                 scan_dir,
                 res_length,
                 contigs + pore_contigs,
+                inpaint,
                 extra_symmetry,
                 num_designs,
                 steps,
             )
 
+            print(shell_script)
             subprocess.run(shell_script, shell=True)  # TODO: hide stdout
 
         for design_idx in range(num_designs):
@@ -344,3 +347,22 @@ def get_fixed_res_ids(structure: bts.AtomArray, pore_res_ids: list[int]) -> list
     )
 
     return pore_contacting_res_ids + buried_res_ids
+
+
+def generate_inpaint_contig(
+    structure: bts.AtomArray, fixed_res_ids: list[int], pore_chain_id: str
+) -> str:
+    """
+    Given residues
+    """
+    protein = structure[~np.isin(structure.chain_id, [pore_chain_id])]
+    protein_chain_id = protein.chain_id[0]
+    res_ids = protein[protein.atom_name == "CA"].res_id
+    inpaint_res_ids = sorted(list(set(res_ids).difference(fixed_res_ids)))
+
+    inpaint_contig = ""
+    for res_id in inpaint_res_ids:
+        inpaint_contig += f"{protein_chain_id}{res_id}-{res_id},"
+    inpaint_contig = inpaint_contig.rstrip(",")
+
+    return inpaint_contig
