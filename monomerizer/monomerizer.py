@@ -30,7 +30,7 @@ random.seed()
 
 @dataclass
 class GeneratedStructure:
-    """Information on an RFDiffusion generated structure."""
+    """Information on a ProteinGenerator generated structure."""
 
     pdb_file: Path
     total_length: int
@@ -41,6 +41,10 @@ class GeneratedStructure:
         input_structure = load_structure(input_pdb)
         generated_structure = load_structure(generated_pdb)
 
+        # remove the pore and the duplicated final residue
+        generated_structure = pdb.clean_generated_structure(generated_structure)
+        save_structure(generated_pdb.with_suffix(".clean.pdb"), generated_structure)
+
         generated_resids = get_unified_resids(
             input_structure, generated_structure, linker_length
         )
@@ -48,15 +52,17 @@ class GeneratedStructure:
         fixed_positions = proteinmpnn.make_fixed_positions_jsonl(
             generated_pdb, generated_structure, generated_resids
         )
-        with open(generated_pdb.with_suffix(".fixed.jsonl"), mode="wb") as fp:
-            with jsonlines.Writer(fp) as writer:
+        with open(generated_pdb.with_suffix(".fixed.jsonl"), mode="wb") as jsonl_file:
+            with jsonlines.Writer(jsonl_file) as writer:
                 writer.write(fixed_positions)
 
         symmetric_positions = proteinmpnn.make_symmetric_positions_jsonl(
             generated_pdb, generated_structure, generated_resids
         )
-        with open(generated_pdb.with_suffix(".symmetric.jsonl"), mode="wb") as fp:
-            with jsonlines.Writer(fp) as writer:
+        with open(
+            generated_pdb.with_suffix(".symmetric.jsonl"), mode="wb"
+        ) as jsonl_file:
+            with jsonlines.Writer(jsonl_file) as writer:
                 writer.write(symmetric_positions)
 
         self.pdb_file = generated_pdb
@@ -223,7 +229,7 @@ def make_shell_script(
     contig_map = contigs.replace("XXX_LINKER", str(res_length))
     symmetry = contigs.count("XXX_LINKER")
 
-    shell_str += f"python ./inference.py "
+    shell_str += "python ./inference.py "
     shell_str += f"--contigs {contig_map} "
     shell_str += f"--inpaint_seq {inpaint} "
     shell_str += f"--symmetry {symmetry + extra_symmetry} "
@@ -273,7 +279,9 @@ def generate_linked_structures(
                 steps,
             )
 
-            subprocess.run(shell_script, shell=True, stdout=subprocess.DEVNULL)
+            subprocess.run(
+                shell_script, shell=True, stdout=subprocess.DEVNULL, check=False
+            )
 
         for design_idx in range(num_designs):
             run_pdb = (
@@ -300,7 +308,7 @@ def get_unified_resids(
     last_resid = None
     chain_breaks = 0
     for resid in input_resids:
-        if last_resid == None:
+        if last_resid is None:
             offset_resid = resid
         elif resid - last_resid > 1:
             chain_breaks += 1

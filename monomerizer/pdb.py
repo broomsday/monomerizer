@@ -4,7 +4,6 @@ Functions for manipulating and analyzing PDB structures.
 
 
 from pathlib import Path
-import itertools
 
 import numpy as np
 import biotite.structure as bts
@@ -15,6 +14,7 @@ from volumizer import utils as volumizer_utils
 from monomerizer.constants import (
     RESNUM_OFFSET,
     BACKBONE_ATOMS,
+    MONOMER_CHAIN,
 )
 from monomerizer.paths import FILL_RES_DIR
 
@@ -31,7 +31,7 @@ def renumber_residues(
 
 def unify_chain_ids(structure: bts.AtomArray) -> bts.AtomArray:
     """
-    Make all chain-ids 'A'
+    Make all chain-ids the same
 
     Also renumbers all atoms to start at round multiples of 100.
     """
@@ -45,11 +45,9 @@ def unify_chain_ids(structure: bts.AtomArray) -> bts.AtomArray:
         chain_id: i * RESNUM_OFFSET for i, chain_id in enumerate(chain_ids)
     }
 
-    # renumber the residues
+    # rename res_ids and chain_ids
     structure.res_id = renumber_residues(structure, chain_resnum_offset)
-
-    # rename all chains to be A
-    structure.chain_id = ["A"] * len(structure)
+    structure.chain_id = [MONOMER_CHAIN] * len(structure)
 
     return structure
 
@@ -89,53 +87,6 @@ def trim_termini(structure: bts.AtomArray, n_trim: int, c_trim: int) -> bts.Atom
     return structure
 
 
-# TODO: abandon this once we have inpainting working as intended
-def revert_to_input(
-    wt_structure: bts.AtomArray,
-    generated_structure: bts.AtomArray,
-    wt_resids: list[int],
-    generated_resids: list[int],
-) -> bts.AtomArray:
-    """
-    Given an input structure and generated structure, revert all non-generated residues in the generated structure
-    to their input amino acids.
-
-    All sidechain atoms are removed.
-    """
-    wt_resnames = wt_structure[wt_structure.atom_name == "CA"].res_name
-    wt_resid_to_resname = {
-        resid: resname for resid, resname in zip(wt_resids, wt_resnames)
-    }
-
-    generated_resids = generated_structure[generated_structure.atom_name == "CA"].res_id
-    generated_resnames = generated_structure[
-        generated_structure.atom_name == "CA"
-    ].res_name
-    generated_resid_resname = {
-        resid: resname
-        for resid, resname in zip(generated_resids, generated_resnames)
-        if resid not in wt_resids
-    }
-
-    resid_to_resname = wt_resid_to_resname | generated_resid_resname
-    new_resnames = list(
-        itertools.chain.from_iterable(
-            [
-                [resid_to_resname[resid]] * len(BACKBONE_ATOMS)
-                for resid in generated_resids
-            ]
-        )
-    )
-
-    # ignore any sidechains that might have been built in by e.g. ProteinGenerator
-    new_structure = generated_structure[
-        np.isin(generated_structure.atom_name, BACKBONE_ATOMS)
-    ]
-    new_structure.res_name = new_resnames
-
-    return new_structure
-
-
 def compute_symmetry_rmsd(structure: bts.AtomArray, resids: list[int]) -> float:
     """
     Assuming newly generated residues are symmetric and link previously symmetric residue groups,
@@ -153,14 +104,10 @@ def compute_symmetry_rmsd(structure: bts.AtomArray, resids: list[int]) -> float:
         last_resid = resid
     resid_segments.append(segment)
 
-    # print(resid_segments)
-
     structure = structure[structure.atom_name == "CA"]
     structure_segments = [
         structure[np.isin(structure.res_id, resids)] for resids in resid_segments
     ]
-
-    # print(structure_segments)
 
     ref_id = int(len(structure_segments) / 2)
     ref_segment = structure_segments[ref_id]
@@ -274,3 +221,17 @@ def get_buried_res_ids(
         for i, res_id in enumerate(structure[structure.atom_name == "CA"].res_id)
         if sasa_per_residue[i] <= buried_cutoff
     ]
+
+
+def clean_generated_structure(structure: bts.AtomArray) -> bts.AtomArray:
+    """
+    Remove the pore and the C-terminal duplicated atom.
+    """
+    # remove the pore
+    structure = structure[structure.chain_id == MONOMER_CHAIN]
+
+    # remove the last residue which is a duplicate of the first
+    last_res_id = structure.res_id[-1]
+    structure = structure[structure.res_id != last_res_id]
+
+    return structure
