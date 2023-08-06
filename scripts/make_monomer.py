@@ -44,8 +44,9 @@ def main(
     Change all chain-ids to A and align axis of cyclic symmetry to the z-axis for a given input PDB.
 
     Examples:
-    python scripts/make_monomer.py tests/pdbs/2XQS_short.pdb tmp/ --generator-steps=2 --linker-lengths=15 --num-designs=1
-    python scripts/make_monomer.py tests/pdbs/4JPP_short.pdb tmp/ --generator-steps=2 --linker-lengths=30 --num-designs=1
+    python scripts/make_monomer.py tests/pdbs/2XQS_short.pdb tmp/ --generator-steps=25 --linker-lengths=15 --num-designs=5
+    python scripts/make_monomer.py tests/pdbs/2XQS_short.pdb tmp/ --generator-steps=10 --linker-lengths=10-20 --num-designs=3
+    python scripts/make_monomer.py tests/pdbs/4JPP_short.pdb tmp/ --generator-steps=15 --linker-lengths=30 --num-designs=1
     """
     output_dir.mkdir(exist_ok=True, parents=True)
 
