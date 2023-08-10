@@ -14,7 +14,7 @@ import biotite.structure as bts
 from biotite.structure.io import load_structure, save_structure
 import jsonlines
 
-from monomerizer import pdb, proteinmpnn
+from monomerizer import pdb, proteinmpnn, paths
 from monomerizer.constants import (
     ANGSTROMS_PER_HELICAL_RESIDUE,
     PEPTIDE_BOND_ATOMS,
@@ -221,8 +221,8 @@ def make_shell_script(
     Write a shell script that will run ProteinGenerator using the input pdb file and computed contigs.
     """
     shell_str = "#!/bin/bash\n\n"
-    shell_str += "cd /home/broom/AlphaCarbon/software/protein_generator\n"
-    shell_str += "source /usr/etc/profile.d/conda.sh\n"
+    shell_str += f"cd {paths.get_protein_generator_path()}\n"
+    shell_str += f"source {paths.get_conda_source_path()}\n"
     shell_str += "conda deactivate\n"
     shell_str += "conda activate proteingenerator\n"
 
@@ -239,7 +239,8 @@ def make_shell_script(
     # shell_str += "--predict_symmetric "
     shell_str += f"--pdb {input_pdb.absolute()} "
     shell_str += f"--T {steps}\n"
-    shell_str += "cd /home/broom/AlphaCarbon/code/porepep\n"
+
+    print(shell_str)
 
     return shell_str
 
@@ -280,7 +281,11 @@ def generate_linked_structures(
             )
 
             subprocess.run(
-                shell_script, shell=True, stdout=subprocess.DEVNULL, check=False
+                shell_script,
+                shell=True,
+                executable="/bin/bash",
+                stdout=subprocess.DEVNULL,
+                check=False,
             )
 
         for design_idx in range(num_designs):
