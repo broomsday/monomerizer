@@ -1,5 +1,7 @@
 # Install base utilities
 FROM nvidia/cuda:11.8.0-devel-ubuntu22.04
+#FROM nvidia/cuda:11.7.1-devel-ubuntu22.04
+#FROM nvidia/cuda:11.7.1-runtime-ubuntu22.04
 
 RUN apt-get update \
     && apt-get install -y build-essential \
@@ -22,16 +24,21 @@ RUN wget http://files.ipd.uw.edu/pub/sequence_diffusion/checkpoints/SEQDIFF_2302
 RUN wget http://files.ipd.uw.edu/pub/sequence_diffusion/checkpoints/SEQDIFF_221219_equalTASKS_nostrSELFCOND_mod30.pt
 
 RUN conda env create -f environment.yml
+RUN pip install poetry
 
 WORKDIR /
 RUN git clone https://github.com/broomsday/monomerizer.git
 WORKDIR /monomerizer
-RUN pip install poetry
+
 SHELL ["/bin/bash", "--login", "-c"]
 RUN poetry config virtualenvs.create false \
     && poetry install 
 
-#SHELL ["/bin/bash", "--login", "-c"]
+ENV PROTEIN_GENERATOR="/protein_generator"
+ENV CONDA_SOURCE="/opt/conda/etc/profile.d/conda.sh"
 
+# TODO: remove this once dockerize branch is merged
+RUN git fetch --all
+RUN git checkout dockerize
 
-#
+ENTRYPOINT ["python", "scripts/make_monomer.py"]
