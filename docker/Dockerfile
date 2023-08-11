@@ -1,7 +1,5 @@
 # Install base utilities
-FROM nvidia/cuda:11.8.0-devel-ubuntu22.04
-#FROM nvidia/cuda:11.7.1-devel-ubuntu22.04
-#FROM nvidia/cuda:11.7.1-runtime-ubuntu22.04
+FROM nvidia/cuda:11.7.1-runtime-ubuntu22.04
 
 RUN apt-get update \
     && apt-get install -y build-essential \
