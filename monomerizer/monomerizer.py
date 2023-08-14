@@ -240,8 +240,6 @@ def make_shell_script(
     shell_str += f"--pdb {input_pdb.absolute()} "
     shell_str += f"--T {steps}\n"
 
-    print(shell_str)
-
     return shell_str
 
 

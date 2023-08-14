@@ -5,6 +5,7 @@ RUN apt-get update \
     && apt-get install -y build-essential \
     && apt-get install -y wget \
     && apt-get install -y git \
+    && apt-get install -y openssh-server \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -35,8 +36,6 @@ RUN poetry config virtualenvs.create false \
 ENV PROTEIN_GENERATOR="/protein_generator"
 ENV CONDA_SOURCE="/opt/conda/etc/profile.d/conda.sh"
 
-# TODO: remove this once dockerize branch is merged
-RUN git fetch --all
-RUN git checkout dockerize
+WORKDIR /workspace
 
-ENTRYPOINT ["python", "scripts/make_monomer.py"]
+ENTRYPOINT ["tail", "-f", "/dev/null"]
