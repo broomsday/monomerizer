@@ -23,19 +23,24 @@ In this example we'll run using `runpod` (https://www.runpod.io/) which will all
 GPUs than you might have locally.
 
 1. Setup a template for monomerizer
-TODO:
+Make a new runpod template with the Container Image as `antiquatedarachnid/monomerizer:latest`
+Set the Docker Command to `/bin/bash`
 
 2. Start the container
-TODO:
+Launch the container using the `runpod` WebGUI
+ssh into the pod using terminal or web-connect options
 
 3. Copy over your desired input file
-TODO:
+`runpodctl send myfile.pdb` on e.g. your local computer and get the `code`
+`runpodctl receive {code}` on the pod
 
 4. Run `monomerizer`
-TODO:
+`python ../monomerizer/scripts/make_monomer.py 2XQS_short.pdb output --generator-steps 2 --num-designs 1 --linker-lengths 11`
 
-5. Copy back your output
-TODO:
+5. Compress the results and send to your local machine
+`tar -czvf outputs.tar.gz outputs`
+`runpodctl send outputs.tar.gz`
+`runpotctl receive {code}`
 
 ## Development
 If you make changes to the code, you can locally use a the new docker image or publish your own
