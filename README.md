@@ -1,6 +1,12 @@
 # Monomerizer
 Take a PDB structure of a symmetric homo-oligomeric barrel, and monomerize without occluding the pore.
 
+Monomerization of shortened version of PDB 2XQS is shown with only small loops added to monomerize.
+![image](images/2XQS_431_combined.png)
+
+Larger modifications can be made aswell such as the large helical linkers for shortened version of PDB 4JPP.
+![image](images/4JPP_640_combined.png)
+
 ## Running Locally as a Single Command
 Running requires only a PDB file as input.  In the example case we use a shortened version of the `2XQS` structure
 from the RCSB.  This file can be found in the repository as `tests/pdbs/2XQS_short.pdb`.
