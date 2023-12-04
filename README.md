@@ -56,6 +56,8 @@ If you make changes to the code, you can locally use a the new docker image or p
 - add `--no-cache` if needing a full rebuild
 
 ### Publishing the Docker Image
-`sudo docker login`
-`sudo docker tag monomerizer:latest your_docker_id/monomerizer:latest`
-`sudo docker push your_docker_id/monomerizer:latest`
+```
+sudo docker login
+sudo docker tag monomerizer:latest your_docker_id/monomerizer:latest
+sudo docker push your_docker_id/monomerizer:latest
+```
