@@ -30,6 +30,7 @@ RUN git clone https://github.com/broomsday/monomerizer.git
 WORKDIR /monomerizer
 
 SHELL ["/bin/bash", "--login", "-c"]
+#RUN poetry config virtualenvs.create true \    # this is probably a better choice, but below works
 RUN poetry config virtualenvs.create false \
     && poetry install 
 
